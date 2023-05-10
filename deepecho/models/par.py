@@ -15,7 +15,7 @@ LOGGER = logging.getLogger(__name__)
 class PARNet(torch.nn.Module):
     """PARModel ANN model."""
 
-    def __init__(self, data_size, context_size, hidden_size=32):
+    def __init__(self, data_size, context_size, hidden_size=16):
         super(PARNet, self).__init__()
         self.context_size = context_size
         self.down = torch.nn.Linear(data_size + context_size, hidden_size)
