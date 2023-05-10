@@ -28,7 +28,7 @@ class PARNet(torch.nn.Module):
         if isinstance(x, torch.nn.utils.rnn.PackedSequence):
             x, lengths = torch.nn.utils.rnn.pad_packed_sequence(x)
             if self.context_size:
-                c = c.unsqueeze(1).expand(-1, x.shape[1], -1)
+                c = c.unsqueeze(1).expand(-1, x.shape[1], self.rnn.hidden_size)
                 x = torch.cat([x, c], dim=2)
 
             x = self.down(x)
@@ -41,7 +41,7 @@ class PARNet(torch.nn.Module):
 
         else:
             if self.context_size:
-                c = c.unsqueeze(1).expand(-1, x.shape[1], -1)
+                c = c.unsqueeze(1).expand(-1, x.shape[1], self.rnn.hidden_size)
                 x = torch.cat([x, c], dim=2)
 
             x = self.down(x)
