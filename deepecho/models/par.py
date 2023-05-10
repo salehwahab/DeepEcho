@@ -19,7 +19,7 @@ class PARNet(torch.nn.Module):
         super(PARNet, self).__init__()
         self.context_size = context_size
         self.down = torch.nn.Linear(data_size + context_size, hidden_size)
-        self.rnn = torch.nn.GRU(hidden_size, hidden_size)
+        self.rnn = torch.nn.GRU(hidden_size, hidden_size, bidirectional=True)
         self.up = torch.nn.Linear(hidden_size, data_size)
 
     def forward(self, x, c):
