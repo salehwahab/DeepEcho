@@ -19,7 +19,8 @@ class PARNet(torch.nn.Module):
         super(PARNet, self).__init__()
         self.context_size = context_size
         self.down = torch.nn.Linear(data_size + context_size, hidden_size)
-        self.rnn = torch.nn.GRU(hidden_size, hidden_size)
+        self.rnn = torch.nn.GRU(hidden_size, hidden_size, batch_first=True)
+        self.attention = torch.nn.Linear(hidden_size, 1, bias=False)
         self.up = torch.nn.Linear(hidden_size, data_size)
 
     def forward(self, x, c):
@@ -27,30 +28,31 @@ class PARNet(torch.nn.Module):
         if isinstance(x, torch.nn.utils.rnn.PackedSequence):
             x, lengths = torch.nn.utils.rnn.pad_packed_sequence(x)
             if self.context_size:
-                x = torch.cat([
-                    x,
-                    c.unsqueeze(0).expand(x.shape[0], c.shape[0], c.shape[1])
-                ], dim=2)
+                c = c.unsqueeze(1).expand(-1, x.shape[1], -1)
+                x = torch.cat([x, c], dim=2)
 
             x = self.down(x)
-            x = torch.nn.utils.rnn.pack_padded_sequence(x, lengths, enforce_sorted=False)
             x, _ = self.rnn(x)
-            x, lengths = torch.nn.utils.rnn.pad_packed_sequence(x)
+            attention_weights = self.attention(x).squeeze(-1)
+            attention_weights = torch.nn.functional.softmax(attention_weights, dim=1)
+            x = torch.bmm(attention_weights.unsqueeze(1), x).squeeze(1)
             x = self.up(x)
             x = torch.nn.utils.rnn.pack_padded_sequence(x, lengths, enforce_sorted=False)
 
         else:
             if self.context_size:
-                x = torch.cat([
-                    x,
-                    c.unsqueeze(0).expand(x.shape[0], c.shape[0], c.shape[1])
-                ], dim=2)
+                c = c.unsqueeze(1).expand(-1, x.shape[1], -1)
+                x = torch.cat([x, c], dim=2)
 
             x = self.down(x)
             x, _ = self.rnn(x)
+            attention_weights = self.attention(x).squeeze(-1)
+            attention_weights = torch.nn.functional.softmax(attention_weights, dim=1)
+            x = torch.bmm(attention_weights.unsqueeze(1), x).squeeze(1)
             x = self.up(x)
 
         return x
+
 
 
 class PARModel(DeepEcho):
