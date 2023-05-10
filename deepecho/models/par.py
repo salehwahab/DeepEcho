@@ -19,9 +19,8 @@ class PARNet(torch.nn.Module):
         super(PARNet, self).__init__()
         self.context_size = context_size
         self.down = torch.nn.Linear(data_size + context_size, hidden_size)
-        self.rnn = torch.nn.GRU(hidden_size, hidden_size, bidirectional=True)
-        self.attn = torch.nn.Linear(hidden_size*2, 1)
-        self.up = torch.nn.Linear(hidden_size*2, data_size)
+        self.rnn = torch.nn.GRU(hidden_size, hidden_size)
+        self.up = torch.nn.Linear(hidden_size, data_size)
 
     def forward(self, x, c):
         """Forward passing computation."""
@@ -37,12 +36,8 @@ class PARNet(torch.nn.Module):
             x = torch.nn.utils.rnn.pack_padded_sequence(x, lengths, enforce_sorted=False)
             x, _ = self.rnn(x)
             x, lengths = torch.nn.utils.rnn.pad_packed_sequence(x)
-
-            attn_scores = self.attn(x)
-            attn_scores = torch.nn.functional.softmax(attn_scores, dim=0)
-            x = (x * attn_scores).sum(dim=0)
-
             x = self.up(x)
+            x = torch.nn.utils.rnn.pack_padded_sequence(x, lengths, enforce_sorted=False)
 
         else:
             if self.context_size:
@@ -53,14 +48,10 @@ class PARNet(torch.nn.Module):
 
             x = self.down(x)
             x, _ = self.rnn(x)
-
-            attn_scores = self.attn(x)
-            attn_scores = torch.nn.functional.softmax(attn_scores, dim=0)
-            x = (x * attn_scores).sum(dim=0)
-
             x = self.up(x)
 
         return x
+
 
 
 
