@@ -13,19 +13,20 @@ LOGGER = logging.getLogger(__name__)
 
 
 class PARNet(torch.nn.Module):
-    """PARModel ANN model."""
+    """PARModel ANN model with attention mechanism."""
 
     def __init__(self, data_size, context_size, hidden_size=32):
         super(PARNet, self).__init__()
         self.context_size = context_size
         self.down = torch.nn.Linear(data_size + context_size, hidden_size)
-        self.rnn = torch.nn.GRU(hidden_size, hidden_size, bidirectional=True)
+        self.rnn = torch.nn.GRU(hidden_size, hidden_size, batch_first=True)
+        self.attn = torch.nn.Linear(hidden_size, 1, bias=False)
         self.up = torch.nn.Linear(hidden_size, data_size)
 
     def forward(self, x, c):
         """Forward passing computation."""
         if isinstance(x, torch.nn.utils.rnn.PackedSequence):
-            x, lengths = torch.nn.utils.rnn.pad_packed_sequence(x)
+            x, lengths = torch.nn.utils.rnn.pad_packed_sequence(x, batch_first=True)
             if self.context_size:
                 x = torch.cat([
                     x,
@@ -33,9 +34,8 @@ class PARNet(torch.nn.Module):
                 ], dim=2)
 
             x = self.down(x)
-            x = torch.nn.utils.rnn.pack_padded_sequence(x, lengths, enforce_sorted=False)
             x, _ = self.rnn(x)
-            x, lengths = torch.nn.utils.rnn.pad_packed_sequence(x)
+            x = self.attention(x)
             x = self.up(x)
             x = torch.nn.utils.rnn.pack_padded_sequence(x, lengths, enforce_sorted=False)
 
@@ -48,13 +48,16 @@ class PARNet(torch.nn.Module):
 
             x = self.down(x)
             x, _ = self.rnn(x)
+            x = self.attention(x)
             x = self.up(x)
 
         return x
-
-
-
-
+    
+    def attention(self, x):
+        """Compute attention weights and apply them to the output of the GRU layer."""
+        attn_weights = torch.softmax(self.attn(x), dim=1)
+        x = (attn_weights * x).sum(dim=1)
+        return x
 
 class PARModel(DeepEcho):
     """Probabilistic autoregressive model.
