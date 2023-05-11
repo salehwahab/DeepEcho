@@ -25,39 +25,23 @@ class PARNet(torch.nn.Module):
         self.up = torch.nn.Linear(hidden_size, data_size)
 
     def forward(self, x, c):
-        """Forward passing computation with attention."""
-        if isinstance(x, torch.nn.utils.rnn.PackedSequence):
-            x, lengths = torch.nn.utils.rnn.pad_packed_sequence(x, batch_first=True)
-        else:
-            lengths = None
-
-        x = self.down(x)
-        x = x.unsqueeze(1)
-        c = c.unsqueeze(0)
+        # Compute output of the RNN layer
+        X = pack_sequences(x, self.sequence_index)
+        C = c.unsqueeze(1).repeat(1, X.shape[1], 1)
+        X = self.rnn(X)[0]
+        X, _ = unpack_sequences(X, self.sequence_index)
+        X = self.dropout(X)
 
         # Compute attention weights
-        attn_input = torch.cat([x, c.repeat(x.shape[0], 1, 1)], dim=2)
+        attn_input = torch.cat([X, C], dim=2)
         attn_scores = self.attn(torch.tanh(attn_input))
         attn_weights = torch.softmax(attn_scores, dim=1)
+        attn_applied = torch.bmm(attn_weights.transpose(1, 2), X)
 
-        # Apply attention
-        x = torch.bmm(attn_weights.permute(0, 2, 1), x)
-        x = x.squeeze(1)
+        # Compute output of the fully connected layer
+        Y = self.fc(attn_applied)
 
-        if lengths is not None:
-            x = torch.nn.utils.rnn.pack_padded_sequence(x, lengths, enforce_sorted=False)
-
-        x, _ = self.rnn(x)
-
-        if lengths is not None:
-            x, lengths = torch.nn.utils.rnn.pad_packed_sequence(x, batch_first=True)
-
-        x = self.up(x)
-
-        if lengths is not None:
-            x = torch.nn.utils.rnn.pack_padded_sequence(x, lengths, enforce_sorted=False)
-
-        return x
+        return Y
 
 
 
