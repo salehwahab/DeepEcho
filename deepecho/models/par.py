@@ -18,7 +18,7 @@ class PARNet(torch.nn.Module):
         super(PARNet, self).__init__()
         self.context_size = context_size
         self.down = torch.nn.utils.weight_norm(torch.nn.Linear(data_size + context_size, hidden_size))
-        self.rnn = torch.nn.GRU(hidden_size, hidden_size)
+        self.rnn = torch.nn.LSTM(hidden_size, hidden_size)
         self.up = torch.nn.utils.weight_norm(torch.nn.Linear(hidden_size, data_size))
         self.activation = torch.nn.ReLU()
 
