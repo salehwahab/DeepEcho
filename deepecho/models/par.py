@@ -8,8 +8,14 @@ import torch
 from tqdm import tqdm
 
 from deepecho.models.base import DeepEcho
+import torch.nn.functional as F
+from torch.nn import MultiheadAttention
+
 
 LOGGER = logging.getLogger(__name__)
+
+import torch.nn.functional as F
+from torch.nn import MultiheadAttention
 
 class PARNet(torch.nn.Module):
     """PARModel ANN model."""
@@ -18,8 +24,9 @@ class PARNet(torch.nn.Module):
         super(PARNet, self).__init__()
         self.context_size = context_size
         self.down = torch.nn.utils.weight_norm(torch.nn.Linear(data_size + context_size, hidden_size))
-        self.rnn = torch.nn.LSTM(hidden_size, hidden_size)
-        self.up = torch.nn.utils.weight_norm(torch.nn.Linear(hidden_size, data_size))
+        self.rnn = torch.nn.GRU(hidden_size, hidden_size)
+        self.attention = MultiheadAttention(hidden_size, num_heads=4, dropout=dropout_rate)
+        self.fc = torch.nn.utils.weight_norm(torch.nn.Linear(hidden_size, data_size))
         self.activation = torch.nn.ReLU()
         self.dropout = torch.nn.Dropout(dropout_rate)
 
@@ -37,9 +44,15 @@ class PARNet(torch.nn.Module):
             x = self.dropout(x)  # Add dropout regularization
             x = torch.nn.utils.rnn.pack_padded_sequence(x, lengths, enforce_sorted=False)
             x, _ = self.rnn(x)
-            x, lengths = torch.nn.utils.rnn.pad_packed_sequence(x)
-            x = self.activation(self.up(x))
-            x = self.dropout(x)  # Add dropout regularization
+
+            x = x.transpose(0, 1)  # Shape: (seq_len, batch_size, hidden_size)
+            x, _ = self.attention(x, x, x)
+            x = x.transpose(0, 1)  # Shape: (batch_size, seq_len, hidden_size)
+
+            x = self.fc(x)
+            x = self.activation(x)
+            x = self.dropout(x)
+            
             x = torch.nn.utils.rnn.pack_padded_sequence(x, lengths, enforce_sorted=False)
 
         else:
@@ -52,12 +65,16 @@ class PARNet(torch.nn.Module):
             x = self.activation(self.down(x))
             x = self.dropout(x)  # Add dropout regularization
             x, _ = self.rnn(x)
-            x = self.activation(self.up(x))
-            x = self.dropout(x)  # Add dropout regularization
+
+            x = x.transpose(0, 1)  # Shape: (seq_len, batch_size, hidden_size)
+            x, _ = self.attention(x, x, x)
+            x = x.transpose(0, 1)  # Shape: (batch_size, seq_len, hidden_size)
+
+            x = self.fc(x)
+            x = self.activation(x)
+            x = self.dropout(x)
 
         return x
-
-
 
 
 class PARModel(DeepEcho):
