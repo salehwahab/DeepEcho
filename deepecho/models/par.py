@@ -13,38 +13,52 @@ LOGGER = logging.getLogger(__name__)
 
 
 class PARNet(torch.nn.Module):
-    """PARModel ANN model."""
+    """PARModel ANN model with attention."""
 
     def __init__(self, data_size, context_size, hidden_size=32):
         super(PARNet, self).__init__()
         self.context_size = context_size
-        self.down = torch.nn.Linear(data_size + context_size, hidden_size)
+        self.hidden_size = hidden_size
+        self.down = torch.nn.Linear(data_size, hidden_size)
+        self.attn = torch.nn.Linear(hidden_size + context_size, 1)
         self.rnn = torch.nn.GRU(hidden_size, hidden_size)
         self.up = torch.nn.Linear(hidden_size, data_size)
 
     def forward(self, x, c):
-        """Forward passing computation."""
+        """Forward passing computation with attention."""
         if isinstance(x, torch.nn.utils.rnn.PackedSequence):
             x, lengths = torch.nn.utils.rnn.pad_packed_sequence(x, batch_first=True)
-            if self.context_size:
-                c = c.transpose(0, 1).unsqueeze(0).expand(x.size(0), -1, -1)
-                x = torch.cat([x, c], dim=1)
-            x = self.down(x)
-            x = torch.nn.utils.rnn.pack_padded_sequence(x, lengths, enforce_sorted=False)
-            x, _ = self.rnn(x)
-            x, lengths = torch.nn.utils.rnn.pad_packed_sequence(x, batch_first=True)
-            x = self.up(x)
+        else:
+            lengths = None
+
+        x = self.down(x)
+        x = x.unsqueeze(1)
+        c = c.unsqueeze(0)
+
+        # Compute attention weights
+        attn_input = torch.cat([x, c.repeat(x.shape[0], 1, 1)], dim=2)
+        attn_scores = self.attn(torch.tanh(attn_input))
+        attn_weights = torch.softmax(attn_scores, dim=1)
+
+        # Apply attention
+        x = torch.bmm(attn_weights.permute(0, 2, 1), x)
+        x = x.squeeze(1)
+
+        if lengths is not None:
             x = torch.nn.utils.rnn.pack_padded_sequence(x, lengths, enforce_sorted=False)
 
-        else:
-            if self.context_size:
-                c = c.transpose(0, 1).unsqueeze(0).expand(x.size(0), -1, -1)
-                x = torch.cat([x, c], dim=1)
-            x = self.down(x)
-            x, _ = self.rnn(x)
-            x = self.up(x)
+        x, _ = self.rnn(x)
+
+        if lengths is not None:
+            x, lengths = torch.nn.utils.rnn.pad_packed_sequence(x, batch_first=True)
+
+        x = self.up(x)
+
+        if lengths is not None:
+            x = torch.nn.utils.rnn.pack_padded_sequence(x, lengths, enforce_sorted=False)
 
         return x
+
 
 
 class PARModel(DeepEcho):
