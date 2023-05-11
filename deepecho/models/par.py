@@ -13,35 +13,44 @@ LOGGER = logging.getLogger(__name__)
 
 
 class PARNet(torch.nn.Module):
-    """PARModel ANN model with attention."""
+    """PARModel ANN model."""
 
     def __init__(self, data_size, context_size, hidden_size=32):
         super(PARNet, self).__init__()
         self.context_size = context_size
-        self.hidden_size = hidden_size
-        self.down = torch.nn.Linear(data_size, hidden_size)
-        self.attn = torch.nn.Linear(hidden_size + context_size, 1)
+        self.down = torch.nn.Linear(data_size + context_size, hidden_size)
         self.rnn = torch.nn.GRU(hidden_size, hidden_size)
         self.up = torch.nn.Linear(hidden_size, data_size)
 
     def forward(self, x, c):
-        # Compute output of the RNN layer
-        X = pack_sequences(x, self.sequence_index)
-        C = c.unsqueeze(1).repeat(1, X.shape[1], 1)
-        X = self.rnn(X)[0]
-        X, _ = unpack_sequences(X, self.sequence_index)
-        X = self.dropout(X)
+        """Forward passing computation."""
+        if isinstance(x, torch.nn.utils.rnn.PackedSequence):
+            x, lengths = torch.nn.utils.rnn.pad_packed_sequence(x)
+            if self.context_size:
+                x = torch.cat([
+                    x,
+                    c.unsqueeze(0).expand(x.shape[0], c.shape[0], c.shape[1])
+                ], dim=2)
 
-        # Compute attention weights
-        attn_input = torch.cat([X, C], dim=2)
-        attn_scores = self.attn(torch.tanh(attn_input))
-        attn_weights = torch.softmax(attn_scores, dim=1)
-        attn_applied = torch.bmm(attn_weights.transpose(1, 2), X)
+            x = self.down(x)
+            x = torch.nn.utils.rnn.pack_padded_sequence(x, lengths, enforce_sorted=False)
+            x, _ = self.rnn(x)
+            x, lengths = torch.nn.utils.rnn.pad_packed_sequence(x)
+            x = self.up(x)
+            x = torch.nn.utils.rnn.pack_padded_sequence(x, lengths, enforce_sorted=False)
 
-        # Compute output of the fully connected layer
-        Y = self.fc(attn_applied)
+        else:
+            if self.context_size:
+                x = torch.cat([
+                    x,
+                    c.unsqueeze(0).expand(x.shape[0], c.shape[0], c.shape[1])
+                ], dim=2)
 
-        return Y
+            x = self.down(x)
+            x, _ = self.rnn(x)
+            x = self.up(x)
+
+        return x
 
 
 
