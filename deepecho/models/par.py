@@ -6,11 +6,12 @@ import numpy as np
 import pandas as pd
 import torch
 from tqdm import tqdm
+from somewhere import Attention
+
 
 from deepecho.models.base import DeepEcho
 
 LOGGER = logging.getLogger(__name__)
-
 
 class PARNet(torch.nn.Module):
     """PARModel ANN model."""
@@ -18,10 +19,10 @@ class PARNet(torch.nn.Module):
     def __init__(self, data_size, context_size, hidden_size=32):
         super(PARNet, self).__init__()
         self.context_size = context_size
-        self.down = torch.nn.Linear(data_size + context_size, hidden_size)
+        self.down = torch.nn.utils.weight_norm(torch.nn.Linear(data_size + context_size, hidden_size))
         self.rnn = torch.nn.GRU(hidden_size, hidden_size)
-        self.attn = Attention(hidden_size)
-        self.up = torch.nn.Linear(hidden_size, data_size)
+        self.up = torch.nn.utils.weight_norm(torch.nn.Linear(hidden_size, data_size))
+        self.activation = torch.nn.ReLU()
 
     def forward(self, x, c):
         """Forward passing computation."""
@@ -33,13 +34,11 @@ class PARNet(torch.nn.Module):
                     c.unsqueeze(0).expand(x.shape[0], c.shape[0], c.shape[1])
                 ], dim=2)
 
-            x = self.down(x)
+            x = self.activation(self.down(x))
             x = torch.nn.utils.rnn.pack_padded_sequence(x, lengths, enforce_sorted=False)
             x, _ = self.rnn(x)
             x, lengths = torch.nn.utils.rnn.pad_packed_sequence(x)
-            context, attn_weights = self.attn(x[-1].unsqueeze(0), x)
-            x = self.up(context)
-
+            x = self.activation(self.up(x))
             x = torch.nn.utils.rnn.pack_padded_sequence(x, lengths, enforce_sorted=False)
 
         else:
@@ -49,12 +48,12 @@ class PARNet(torch.nn.Module):
                     c.unsqueeze(0).expand(x.shape[0], c.shape[0], c.shape[1])
                 ], dim=2)
 
-            x = self.down(x)
+            x = self.activation(self.down(x))
             x, _ = self.rnn(x)
-            context, attn_weights = self.attn(x[-1].unsqueeze(0), x)
-            x = self.up(context)
+            x = self.activation(self.up(x))
 
         return x
+
 
 
 class PARModel(DeepEcho):
