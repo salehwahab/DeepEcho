@@ -14,13 +14,14 @@ LOGGER = logging.getLogger(__name__)
 class PARNet(torch.nn.Module):
     """PARModel ANN model."""
 
-    def __init__(self, data_size, context_size, hidden_size=32):
+    def __init__(self, data_size, context_size, hidden_size=32, dropout_rate=0.2):
         super(PARNet, self).__init__()
         self.context_size = context_size
         self.down = torch.nn.utils.weight_norm(torch.nn.Linear(data_size + context_size, hidden_size))
-        self.rnn = torch.nn.LSTM(hidden_size, hidden_size)
+        self.rnn = torch.nn.GRU(hidden_size, hidden_size)
         self.up = torch.nn.utils.weight_norm(torch.nn.Linear(hidden_size, data_size))
         self.activation = torch.nn.ReLU()
+        self.dropout = torch.nn.Dropout(dropout_rate)
 
     def forward(self, x, c):
         """Forward passing computation."""
@@ -33,10 +34,12 @@ class PARNet(torch.nn.Module):
                 ], dim=2)
 
             x = self.activation(self.down(x))
+            x = self.dropout(x)  # Add dropout regularization
             x = torch.nn.utils.rnn.pack_padded_sequence(x, lengths, enforce_sorted=False)
             x, _ = self.rnn(x)
             x, lengths = torch.nn.utils.rnn.pad_packed_sequence(x)
             x = self.activation(self.up(x))
+            x = self.dropout(x)  # Add dropout regularization
             x = torch.nn.utils.rnn.pack_padded_sequence(x, lengths, enforce_sorted=False)
 
         else:
@@ -47,10 +50,13 @@ class PARNet(torch.nn.Module):
                 ], dim=2)
 
             x = self.activation(self.down(x))
+            x = self.dropout(x)  # Add dropout regularization
             x, _ = self.rnn(x)
             x = self.activation(self.up(x))
+            x = self.dropout(x)  # Add dropout regularization
 
         return x
+
 
 
 
