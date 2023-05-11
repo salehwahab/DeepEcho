@@ -13,52 +13,52 @@ LOGGER = logging.getLogger(__name__)
 
 
 class PARNet(torch.nn.Module):
-    """PARModel ANN model."""
+    """PARModel ANN model with attention mechanism."""
 
     def __init__(self, data_size, context_size, hidden_size=32):
         super(PARNet, self).__init__()
         self.context_size = context_size
-        self.hidden_size = hidden_size
         self.down = torch.nn.Linear(data_size + context_size, hidden_size)
         self.rnn = torch.nn.GRU(hidden_size, hidden_size, batch_first=True)
-        self.attention = torch.nn.Linear(hidden_size + context_size, 1, bias=False)
+        self.attn = torch.nn.Linear(hidden_size, 1, bias=False)
         self.up = torch.nn.Linear(hidden_size, data_size)
 
     def forward(self, x, c):
         """Forward passing computation."""
         if isinstance(x, torch.nn.utils.rnn.PackedSequence):
             x, lengths = torch.nn.utils.rnn.pad_packed_sequence(x, batch_first=True)
+            if self.context_size:
+                x = torch.cat([
+                    x,
+                    c.unsqueeze(0).expand(x.shape[0], c.shape[0], c.shape[1])
+                ], dim=2)
+
+            x = self.down(x)
+            x, _ = self.rnn(x)
+            x = self.attention(x)
+            x = self.up(x)
+            x = torch.nn.utils.rnn.pack_padded_sequence(x, lengths, enforce_sorted=False)
+
         else:
-            lengths = None
+            if self.context_size:
+                x = torch.cat([
+                    x,
+                    c.unsqueeze(0).expand(x.shape[0], c.shape[0], c.shape[1])
+                ], dim=2)
 
-        batch_size, sequence_length, data_size = x.shape
-        context_size = c.shape[1]
+            x = self.down(x)
+            x, _ = self.rnn(x)
+            x = self.attention(x)
+            x = self.up(x)
 
-        # Concatenate context vector with each input in the sequence
-        c_expanded = c.unsqueeze(1).expand(batch_size, sequence_length, context_size)
-        x_cat = torch.cat([x, c_expanded], dim=2)
+        return x
+    
+    def attention(self, x):
+        """Compute attention weights and apply them to the output of the GRU layer."""
+        attn_weights = torch.softmax(self.attn(x), dim=1)
+        x = (attn_weights * x).sum(dim=1)
+        return x
 
-        # Compute attention weights over the sequence
-        x_att = torch.tanh(self.down(x_cat))
-        context_expanded = c.unsqueeze(1).expand(batch_size, sequence_length, context_size)
-        x_context = torch.cat([x_att, context_expanded], dim=2)
-        attention_weights = torch.softmax(self.attention(x_context), dim=1)
-
-        # Apply attention weights to sequence
-        x_attended = torch.bmm(x_att.transpose(1, 2), attention_weights).transpose(1, 2)
-
-        # Pass attended sequence through RNN
-        if lengths is not None:
-            x_packed = torch.nn.utils.rnn.pack_padded_sequence(x_attended, lengths, batch_first=True, enforce_sorted=False)
-            x_rnn, _ = self.rnn(x_packed)
-            x_rnn, _ = torch.nn.utils.rnn.pad_packed_sequence(x_rnn, batch_first=True)
-        else:
-            x_rnn, _ = self.rnn(x_attended)
-
-        # Compute final output
-        x_out = self.up(x_rnn)
-
-        return x_out
 
 class PARModel(DeepEcho):
     """Probabilistic autoregressive model.
